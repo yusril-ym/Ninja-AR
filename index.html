@@ -491,18 +491,61 @@
 
             // --- CAMERA SETUP ---
             async function initCamera() {
+                // Disable buttons and inputs
                 document.getElementById('btnSingle').disabled = true;
                 document.getElementById('btnMulti').disabled = true;
                 document.getElementById('confirmNamesBtn').disabled = true;
                 
                 statusMsg.textContent = "Mengakses kamera...";
+                statusMsg.style.color = "#aaa";
                 
                 if (cameraActive) {
                     startGame(selectedMode);
                     return;
                 }
 
+                // Fungsi helper untuk menangani sukses
+                const handleSuccess = (stream) => {
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => {
+                        statusMsg.textContent = "";
+                        cameraActive = true;
+                        startGame(selectedMode);
+                    };
+                };
+
+                // Fungsi helper untuk menangani error akhir
+                const handleError = (err) => {
+                    console.error("Camera Error:", err);
+                    statusMsg.style.color = "#ff5252";
+                    
+                    // Deteksi spesifik untuk masalah Overlay/Izin
+                    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                        statusMsg.innerHTML = "⚠️ Akses Ditolak! Matikan <b>Quick Ball/Overlay</b> lalu coba lagi.";
+                    } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                        statusMsg.textContent = "Kamera sedang digunakan aplikasi lain.";
+                    } else if (err.name === 'NotFoundError') {
+                        statusMsg.textContent = "Kamera tidak ditemukan.";
+                    } else {
+                        statusMsg.textContent = "Gagal akses kamera. Coba refresh.";
+                    }
+
+                    // Re-enable tombol agar user bisa coba lagi
+                    setTimeout(() => {
+                        document.getElementById('btnSingle').disabled = false;
+                        document.getElementById('btnMulti').disabled = false;
+                        document.getElementById('confirmNamesBtn').disabled = false;
+
+                        // Tawarkan mode mouse sebagai cadangan
+                        if(confirm("Kamera gagal diakses (Mungkin terhalang Overlay/Quick Ball). Main dengan Mouse saja?")) {
+                            cameraActive = true; 
+                            startGame(selectedMode); 
+                        }
+                    }, 1500);
+                };
+
                 try {
+                    // PERCOBAAN 1: Kualitas Ideal
                     const stream = await navigator.mediaDevices.getUserMedia({
                         video: {
                             facingMode: 'user',
@@ -511,24 +554,21 @@
                         },
                         audio: false
                     });
-                    
-                    video.srcObject = stream;
-                    video.onloadedmetadata = () => {
-                        statusMsg.textContent = "";
-                        cameraActive = true;
-                        startGame(selectedMode);
-                    };
+                    handleSuccess(stream);
+
                 } catch (err) {
-                    console.error(err);
-                    statusMsg.textContent = "Gagal akses kamera.";
-                    setTimeout(() => {
-                        if(confirm("Kamera gagal. Main dengan Mouse?")) {
-                            cameraActive = true; 
-                            startGame(selectedMode); 
-                        } else {
-                            showMainMenu();
-                        }
-                    }, 500);
+                    console.warn("Retrying camera with minimal constraints...", err);
+                    
+                    try {
+                        // PERCOBAAN 2: Fallback ke pengaturan paling dasar (seringkali berhasil meski ada overlay ringan)
+                        const stream = await navigator.mediaDevices.getUserMedia({
+                            video: true, // Tanpa constraint resolusi/facing mode spesifik
+                            audio: false
+                        });
+                        handleSuccess(stream);
+                    } catch (err2) {
+                        handleError(err2);
+                    }
                 }
             }
 
@@ -604,4 +644,399 @@
                 let subText = "";
 
                 if (selectedMode === 'SINGLE') {
-                    titleText
+                    titleText = "Permainan Selesai";
+                    subText = `Skor Akhir: ${p1.score}`;
+                } else {
+                    if (p1.score > p2.score) {
+                        titleText = `🏆 ${p1.name} MENANG! 🏆`;
+                        subText = `${p1.name}: ${p1.score} vs ${p2.name}: ${p2.score}`;
+                    } else if (p2.score > p1.score) {
+                        titleText = `🏆 ${p2.name} MENANG! 🏆`;
+                        subText = `${p2.name}: ${p2.score} vs ${p1.name}: ${p1.score}`;
+                    } else {
+                        titleText = "🤝 SERI! 🤝";
+                        subText = "Skor Sama Kuat";
+                    }
+                }
+
+                menuTitle.textContent = titleText;
+                menuSubtitle.textContent = subText;
+                
+                winnerAnnounce.style.display = 'none';
+                
+                modeButtons.style.display = 'none';
+                nameInputs.style.display = 'none';
+                restartBtn.style.display = 'block';
+                returnMenuBtn.style.display = 'block';
+                
+                menuScreen.style.display = 'flex';
+            }
+
+            function spawnObject() {
+                if (selectedMode === 'SINGLE') {
+                    if (!p1.active) return;
+                } else {
+                    if (!p1.active && !p2.active) return;
+                }
+
+                const isBomb = Math.random() < 0.2; 
+                const x = Math.random() * (w - 100) + 50;
+                const y = h + 50;
+                let targetX;
+
+                if (selectedMode === 'SINGLE') {
+                    targetX = (w / 2) + (Math.random() - 0.5) * (w * 0.5);
+                } else {
+                    targetX = (x < w/2) ? w/4 : (w * 0.75);
+                    targetX += (Math.random() - 0.5) * 200;
+                }
+
+                const vy = -(Math.random() * 6 + 13);
+                const vx = (targetX - x) * 0.015;
+
+                const obj = {
+                    x, y, vx, vy,
+                    radius: 40,
+                    rotation: 0,
+                    rotationSpeed: (Math.random() - 0.5) * 0.2
+                };
+
+                if (isBomb) {
+                    obj.emoji = '💣';
+                    bombs.push(obj);
+                } else {
+                    obj.emoji = fruitTypes[Math.floor(Math.random() * fruitTypes.length)];
+                    fruits.push(obj);
+                }
+            }
+
+            function createParticles(x, y, color) {
+                for (let i = 0; i < 8; i++) {
+                    particles.push({
+                        x, y,
+                        vx: (Math.random() - 0.5) * 12,
+                        vy: (Math.random() - 0.5) * 12,
+                        life: 1.0,
+                        color: color
+                    });
+                }
+            }
+            
+            // Membuat efek garis tebasan (slash)
+            function createSlash(x, y) {
+                slashes.push({
+                    x, y,
+                    angle: Math.random() * Math.PI, // Arah acak untuk variasi visual
+                    length: 80 + Math.random() * 40,
+                    life: 1.0,
+                    color: 'white'
+                });
+            }
+
+            // --- MOTION & INTERACTION ---
+            
+            function processMotion() {
+                ctx.save();
+                ctx.translate(w, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, 0, 0, w, h);
+                ctx.restore();
+
+                const scaledW = Math.floor(w / motionGridSize);
+                const scaledH = Math.floor(h / motionGridSize);
+                
+                if (!tempCanvas) {
+                    tempCanvas = document.createElement('canvas');
+                    tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+                }
+                tempCanvas.width = scaledW;
+                tempCanvas.height = scaledH;
+                
+                tempCtx.save();
+                tempCtx.translate(scaledW, 0);
+                tempCtx.scale(-1, 1);
+                tempCtx.drawImage(video, 0, 0, scaledW, scaledH);
+                tempCtx.restore();
+
+                const frameData = tempCtx.getImageData(0, 0, scaledW, scaledH).data;
+
+                if (!prevFrameData) {
+                    prevFrameData = frameData;
+                    return;
+                }
+
+                // Reset motion trail untuk frame ini (kita hanya gambar titik aktif saat ini)
+                // Opsi lain: persistensi (trailing), tapi titik real-time lebih responsif
+                motionTrail = [];
+
+                for (let y = 0; y < scaledH; y += 2) {
+                    for (let x = 0; x < scaledW; x += 2) {
+                        const index = (y * scaledW + x) * 4;
+                        
+                        const diff = Math.abs(frameData[index] - prevFrameData[index]) +
+                                     Math.abs(frameData[index+1] - prevFrameData[index+1]) +
+                                     Math.abs(frameData[index+2] - prevFrameData[index+2]);
+                        
+                        if (diff > motionThreshold * 3) {
+                            const realX = x * motionGridSize;
+                            const realY = y * motionGridSize;
+                            
+                            // Tambahkan ke visualisasi jejak
+                            motionTrail.push({x: realX, y: realY});
+                            
+                            handleInteraction(realX, realY);
+                        }
+                    }
+                }
+                prevFrameData = frameData;
+            }
+
+            function handleInteraction(x, y) {
+                let interactor = null; 
+
+                if (selectedMode === 'SINGLE') {
+                    if (p1.active) interactor = 'P1';
+                } else {
+                    const isP1Zone = x < w / 2;
+                    if (isP1Zone && p1.active) interactor = 'P1';
+                    if (!isP1Zone && p2.active) interactor = 'P2';
+                }
+
+                if (!interactor) return;
+
+                // --- CEK FRUITS ---
+                for (let i = fruits.length - 1; i >= 0; i--) {
+                    const f = fruits[i];
+                    const dist = Math.hypot(x - f.x, y - f.y);
+                    
+                    if (dist < f.radius + 30) {
+                        // Action
+                        if (interactor === 'P1') {
+                            p1.score += 10;
+                            if(p1.fruitCounts[f.emoji] !== undefined) p1.fruitCounts[f.emoji]++;
+                            createParticles(f.x, f.y, '#2196F3'); 
+                        } else {
+                            p2.score += 10;
+                            if(p2.fruitCounts[f.emoji] !== undefined) p2.fruitCounts[f.emoji]++;
+                            createParticles(f.x, f.y, '#FF9800'); 
+                        }
+
+                        // Buat efek tebasan
+                        createSlash(f.x, f.y);
+                        
+                        fruits.splice(i, 1);
+                        updateUI();
+                    }
+                }
+
+                // --- CEK BOMBS ---
+                for (let i = bombs.length - 1; i >= 0; i--) {
+                    const b = bombs[i];
+                    const dist = Math.hypot(x - b.x, y - b.y);
+
+                    if (dist < b.radius + 30) {
+                        createParticles(b.x, b.y, '#000');
+                        bombs.splice(i, 1);
+                        
+                        if (interactor === 'P1') {
+                            p1.lives--;
+                            if (p1.lives <= 0) {
+                                p1.active = false;
+                                if (selectedMode === 'MULTI') p1StatusEl.style.display = 'block';
+                            }
+                        } else {
+                            p2.lives--;
+                            if (p2.lives <= 0) {
+                                p2.active = false;
+                                p2StatusEl.style.display = 'block';
+                            }
+                        }
+                        updateUI();
+                        
+                        if (selectedMode === 'SINGLE' && !p1.active) {
+                            gameOver();
+                        } else if (selectedMode === 'MULTI' && !p1.active && !p2.active) {
+                            gameOver();
+                        }
+                    }
+                }
+            }
+
+            function updatePhysics() {
+                const gravity = 0.4;
+
+                for (let i = fruits.length - 1; i >= 0; i--) {
+                    let f = fruits[i];
+                    f.x += f.vx;
+                    f.y += f.vy;
+                    f.vy += gravity;
+                    f.rotation += f.rotationSpeed;
+                    if (f.y > h + 100) fruits.splice(i, 1);
+                }
+
+                for (let i = bombs.length - 1; i >= 0; i--) {
+                    let b = bombs[i];
+                    b.x += b.vx;
+                    b.y += b.vy;
+                    b.vy += gravity;
+                    b.rotation += b.rotationSpeed;
+                    if (b.y > h + 100) bombs.splice(i, 1);
+                }
+
+                // Update Particles
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    let p = particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.life -= 0.05;
+                    if (p.life <= 0) particles.splice(i, 1);
+                }
+                
+                // Update Slashes
+                for (let i = slashes.length - 1; i >= 0; i--) {
+                    let s = slashes[i];
+                    s.life -= 0.1; // Hilang lebih cepat
+                    if (s.life <= 0) slashes.splice(i, 1);
+                }
+            }
+
+            function drawGame() {
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = '60px Arial';
+
+                // 1. Gambar Motion Trail (Real-time Hand Tracker)
+                // Gambar sebagai partikel cahaya halus
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                // Bisa ubah warna berdasarkan pemain jika mau
+                motionTrail.forEach(pt => {
+                     ctx.beginPath();
+                     ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+                     ctx.fill();
+                });
+
+                // 2. Gambar Buah
+                fruits.forEach(f => {
+                    ctx.save();
+                    ctx.translate(f.x, f.y);
+                    ctx.rotate(f.rotation);
+                    ctx.fillText(f.emoji, 0, 0);
+                    ctx.restore();
+                });
+
+                // 3. Gambar Bom
+                bombs.forEach(b => {
+                    ctx.save();
+                    ctx.translate(b.x, b.y);
+                    ctx.rotate(b.rotation);
+                    ctx.fillText(b.emoji, 0, 0);
+                    ctx.restore();
+                });
+
+                // 4. Gambar Partikel Ledakan
+                particles.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = p.life;
+                    ctx.fill();
+                    ctx.globalAlpha = 1.0;
+                });
+                
+                // 5. Gambar Garis Tebasan (Slash)
+                slashes.forEach(s => {
+                    ctx.save();
+                    ctx.translate(s.x, s.y);
+                    ctx.rotate(s.angle);
+                    ctx.globalAlpha = s.life;
+                    
+                    // Efek glow
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = 'cyan';
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.moveTo(-s.length / 2, 0);
+                    ctx.lineTo(s.length / 2, 0);
+                    ctx.stroke();
+                    
+                    ctx.shadowBlur = 0;
+                    ctx.globalAlpha = 1.0;
+                    ctx.restore();
+                });
+            }
+
+            function gameLoop() {
+                if (gameState !== 'PLAYING') return;
+
+                ctx.clearRect(0, 0, w, h);
+
+                if (video.readyState >= 2) {
+                    processMotion();
+                } else {
+                    ctx.fillStyle = '#222';
+                    ctx.fillRect(0,0,w,h);
+                }
+
+                updatePhysics();
+                drawGame();
+
+                animationId = requestAnimationFrame(gameLoop);
+            }
+
+            // Mouse Fallback
+            window.addEventListener('mousemove', (e) => {
+                if (gameState === 'PLAYING') {
+                    // Tambahkan ke visual trail juga jika pakai mouse
+                    motionTrail.push({x: e.clientX, y: e.clientY});
+                    handleInteraction(e.clientX, e.clientY);
+                }
+            });
+            window.addEventListener('touchmove', (e) => {
+                 if (gameState === 'PLAYING') {
+                     motionTrail = []; // Reset manual untuk touch
+                     for(let i=0; i<e.touches.length; i++) {
+                         let tx = e.touches[i].clientX;
+                         let ty = e.touches[i].clientY;
+                         motionTrail.push({x: tx, y: ty});
+                         handleInteraction(tx, ty);
+                     }
+                 }
+            });
+
+            function renderFruitStats(playerData, containerEl) {
+                containerEl.innerHTML = '';
+                fruitTypes.forEach(type => {
+                    const count = playerData.fruitCounts[type] || 0;
+                    if (count > 0 || selectedMode === 'SINGLE') { 
+                        const item = document.createElement('div');
+                        item.className = 'stat-item';
+                        item.innerHTML = `${type} <span>${count}</span>`;
+                        containerEl.appendChild(item);
+                    }
+                });
+            }
+
+            function updateUI() {
+                p1ScoreEl.textContent = p1.score;
+                p2ScoreEl.textContent = p2.score;
+                
+                const getHearts = (n) => {
+                    let s = ""; 
+                    for(let i=0; i<n; i++) s += "❤️"; 
+                    return s || "💀";
+                };
+
+                p1LivesEl.textContent = getHearts(p1.lives);
+                p2LivesEl.textContent = getHearts(p2.lives);
+
+                renderFruitStats(p1, p1StatsEl);
+                if (selectedMode === 'MULTI') renderFruitStats(p2, p2StatsEl);
+
+                if (!p1.active) p1LivesEl.style.opacity = 0.5; else p1LivesEl.style.opacity = 1;
+                if (!p2.active) p2LivesEl.style.opacity = 0.5; else p2LivesEl.style.opacity = 1;
+            }
+        });
+    </script>
+</body>
+</html>
